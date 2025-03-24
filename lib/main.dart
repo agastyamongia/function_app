@@ -1,52 +1,127 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'router.dart';
+import 'screens/login_screen.dart';
+import 'services/rso_service.dart';
+import 'services/event_service.dart';
+import 'screens/rso_registration_screen.dart';
+import 'screens/event_creation_screen.dart';
+import 'package:intl/intl.dart';
+import 'models/event.dart';
+import 'screens/event_details_screen.dart';
 
-void main() {
+/// Initializes the Supabase client and starts the application
+Future<void> main() async {
+  await Supabase.initialize(
+    url: 'https://eolsgonqepuyolaagmsl.supabase.co',
+    anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVvbHNnb25xZXB1eW9sYWFnbXNsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDIxNjgzNjAsImV4cCI6MjA1Nzc0NDM2MH0.KxmVx0DZv9ewrKIfNP5FdggPTeaB_BGhk5L3XTJL6M8'
+  );
   runApp(const MyApp());
 }
 
+/// Root widget of the application that sets up the theme and initial route
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
-  // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Flutter Demo',
+    return MaterialApp.router(
+      title: 'FUNQ!',
       theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
+        useMaterial3: true,
       ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
+      routerConfig: router,
     );
   }
 }
 
+/// Wrapper widget that handles authentication state and navigation
+class AuthWrapper extends StatefulWidget {
+  const AuthWrapper({super.key});
+
+  @override
+  State<AuthWrapper> createState() => _AuthWrapperState();
+}
+
+class _AuthWrapperState extends State<AuthWrapper> {
+  @override
+  void initState() {
+    super.initState();
+    _setupAuthListener();
+    _checkCurrentSession();
+  }
+
+  /// Checks if there's an existing session when the app starts
+  Future<void> _checkCurrentSession() async {
+    final session = await Supabase.instance.client.auth.currentSession;
+    if (session != null && mounted) {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (context) => const MyHomePage(title: 'University Club Events')),
+      );
+    }
+  }
+
+  /// Sets up a listener for authentication state changes
+  void _setupAuthListener() {
+    Supabase.instance.client.auth.onAuthStateChange.listen((data) {
+      final AuthChangeEvent event = data.event;
+      final Session? session = data.session;
+      
+      if (!mounted) return;
+
+      if (event == AuthChangeEvent.signedIn && session != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Successfully signed in!')),
+        );
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (context) => const MyHomePage(title: 'University Club Events')),
+        );
+      } else if (event == AuthChangeEvent.signedOut) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Successfully signed out')),
+        );
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (context) => const LoginScreen()),
+        );
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<AuthState>(
+      stream: Supabase.instance.client.auth.onAuthStateChange,
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return Scaffold(
+            body: Center(
+              child: Text('Error: ${snapshot.error}'),
+            ),
+          );
+        }
+
+        if (snapshot.connectionState == ConnectionState.active) {
+          final session = snapshot.data?.session;
+          return session != null
+              ? const MyHomePage(title: 'University Club Events')
+              : const LoginScreen();
+        }
+
+        // Loading state
+        return const Scaffold(
+          body: Center(
+            child: CircularProgressIndicator(),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// Main home page of the application after authentication
 class MyHomePage extends StatefulWidget {
   const MyHomePage({super.key, required this.title});
-
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
   final String title;
 
   @override
@@ -54,69 +129,388 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
+  final _rsoService = RSOService();
+  final _eventService = EventService();
+  List<Map<String, dynamic>> _userRSOs = [];
+  List<Event> _userEvents = [];
+  bool _isLoading = true;
 
-  void _incrementCounter() {
-    setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
-    });
+  @override
+  void initState() {
+    super.initState();
+    _loadData();
+  }
+
+  /// Fetches both RSOs and user events
+  Future<void> _loadData() async {
+    try {
+      final rsosData = _rsoService.getUserRSOs();
+      final userEventsData = _eventService.getUserEvents();
+      
+      final results = await Future.wait([rsosData, userEventsData]);
+      
+      if (mounted) {
+        setState(() {
+          _userRSOs = results[0] as List<Map<String, dynamic>>;
+          _userEvents = results[1] as List<Event>;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error loading data: $e')),
+        );
+      }
+    }
+  }
+
+  /// Handles user logout and navigation to login screen
+  Future<void> _handleLogout() async {
+    await Supabase.instance.client.auth.signOut();
+    if (mounted) {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (context) => const LoginScreen()),
+      );
+    }
+  }
+
+  /// Navigates to RSO registration screen
+  void _navigateToRSORegistration() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => RSORegistrationScreen(
+          onRSORegistered: _loadData,
+        ),
+      ),
+    );
+  }
+
+  /// Navigates to event creation screen
+  void _navigateToEventCreation() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => EventCreationScreen(
+          onEventCreated: _loadData,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _publishEvent(Event event) async {
+    try {
+      await _eventService.publishEvent(event.id);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Event published successfully!')),
+        );
+        _loadData();  // Refresh data after publishing
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error publishing event: $e')),
+        );
+      }
+    }
+  }
+
+  Widget _buildEventCard(Event event, {bool isUserEvent = false}) {
+    final bool canPublish = isUserEvent && !event.isPublished;
+    
+    return Card(
+      margin: const EdgeInsets.only(bottom: 16),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: () async {
+            debugPrint('Navigating to event details: ${event.id}');
+            await Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => EventDetailsScreen(
+                  event: event,
+                  isOwner: isUserEvent,
+                  onEventUpdated: _loadData,
+                ),
+              ),
+            );
+            if (mounted) {
+              _loadData();
+            }
+          },
+          child: Container(
+            decoration: BoxDecoration(
+              border: Border.all(
+                color: isUserEvent ? Colors.blue.withOpacity(0.3) : Colors.transparent,
+                width: 1,
+              ),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              event.title,
+                              style: const TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Hosted by ${event.rsoName}',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.grey[600],
+                                fontStyle: FontStyle.italic,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (!event.isPublished)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.orange,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Text(
+                            'Draft',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    event.description,
+                    style: Theme.of(context).textTheme.bodyMedium,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      const Icon(Icons.calendar_today, size: 16),
+                      const SizedBox(width: 8),
+                      Text(
+                        DateFormat('MMM d, y HH:mm').format(event.startTime),
+                        style: const TextStyle(fontWeight: FontWeight.w500),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      const Icon(Icons.location_on, size: 16),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          event.location,
+                          style: const TextStyle(fontWeight: FontWeight.w500),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (event.price != null) ...[
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        const Icon(Icons.attach_money, size: 16),
+                        const SizedBox(width: 8),
+                        Text(
+                          '\$${event.price?.toStringAsFixed(2)}',
+                          style: const TextStyle(fontWeight: FontWeight.w500),
+                        ),
+                      ],
+                    ),
+                  ],
+                  if (canPublish) ...[
+                    const SizedBox(height: 16),
+                    const Divider(),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        TextButton.icon(
+                          onPressed: () => _publishEvent(event),
+                          icon: const Icon(Icons.publish),
+                          label: const Text('Publish'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEventsList() {
+    // Group events by RSO
+    final Map<String, List<Event>> eventsByRSO = {};
+    for (final event in _userEvents) {
+      if (!eventsByRSO.containsKey(event.rsoId)) {
+        eventsByRSO[event.rsoId] = [];
+      }
+      eventsByRSO[event.rsoId]!.add(event);
+    }
+
+    if (_userEvents.isEmpty) {
+      return const Center(
+        child: Text('You haven\'t created any events yet'),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: eventsByRSO.entries.map((entry) {
+        final events = entry.value;
+        final rsoName = events.first.rsoName;
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8.0),
+              child: Text(
+                rsoName,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.blue,
+                ),
+              ),
+            ),
+            ...events.map((event) => _buildEventCard(event, isUserEvent: true)),
+            const SizedBox(height: 16),
+          ],
+        );
+      }).toList(),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
     return Scaffold(
       appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
         title: Text(widget.title),
-      ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
-        child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            const Text('You have pushed the button this many times:'),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
-            ),
-          ],
+        leading: IconButton(
+          icon: const Icon(Icons.logout),
+          onPressed: _handleLogout,
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
-      ), // This trailing comma makes auto-formatting nicer for build methods.
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : ListView(
+              padding: const EdgeInsets.all(16.0),
+              children: [
+                const Text(
+                  'Welcome to FUNQ!',
+                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 32),
+                ElevatedButton.icon(
+                  onPressed: _navigateToRSORegistration,
+                  icon: const Icon(Icons.add),
+                  label: const Text('Register An RSO'),
+                  style: ElevatedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 32,
+                      vertical: 16,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                ElevatedButton.icon(
+                  onPressed: _navigateToEventCreation,
+                  icon: const Icon(Icons.event),
+                  label: const Text('Create New Event'),
+                  style: ElevatedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 32,
+                      vertical: 16,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 32),
+                const Text(
+                  'Your RSOs',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 16),
+                if (_userRSOs.isEmpty)
+                  const Card(
+                    child: Padding(
+                      padding: EdgeInsets.all(16.0),
+                      child: Text(
+                        'You haven\'t registered any RSOs yet. Use the button above to register your first RSO!',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 16,
+                          color: Colors.grey,
+                        ),
+                      ),
+                    ),
+                  )
+                else
+                  ...List.generate(_userRSOs.length, (index) {
+                    final rso = _userRSOs[index];
+                    return Card(
+                      margin: const EdgeInsets.only(bottom: 16),
+                      child: ListTile(
+                        title: Text(rso['name']),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(rso['description']),
+                            const SizedBox(height: 4),
+                            Text('Contact: ${rso['email']}'),
+                          ],
+                        ),
+                        isThreeLine: true,
+                        trailing: IconButton(
+                          icon: const Icon(Icons.edit),
+                          onPressed: () {
+                            // TODO: Implement RSO editing
+                          },
+                        ),
+                      ),
+                    );
+                  }),
+                const SizedBox(height: 32),
+                const Text(
+                  'Your Events',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 16),
+                _buildEventsList(),
+              ],
+            ),
     );
   }
 }
