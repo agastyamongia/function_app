@@ -158,12 +158,11 @@ class _LoginScreenState extends State<LoginScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 const Text(
-                  'Welcome to FUNQ!',
+                  'Welcome to Function',
                   style: TextStyle(
-                    fontSize: 32,
-                     fontWeight: FontWeight.bold,
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
                   ),
-                  textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 48),
                 TextFormField(

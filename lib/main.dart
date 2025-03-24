@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'router.dart';
 import 'screens/login_screen.dart';
 import 'services/rso_service.dart';
 import 'services/event_service.dart';
@@ -25,13 +24,14 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp.router(
-      title: 'FUNQ!',
+    return MaterialApp(
+      title: 'Function',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
         useMaterial3: true,
       ),
-      routerConfig: router,
+      home: const AuthWrapper(),
     );
   }
 }
@@ -57,7 +57,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
     final session = await Supabase.instance.client.auth.currentSession;
     if (session != null && mounted) {
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (context) => const MyHomePage(title: 'University Club Events')),
+        MaterialPageRoute(builder: (context) => const MyHomePage(title: 'Function')),
       );
     }
   }
@@ -75,7 +75,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
           const SnackBar(content: Text('Successfully signed in!')),
         );
         Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (context) => const MyHomePage(title: 'University Club Events')),
+          MaterialPageRoute(builder: (context) => const MyHomePage(title: 'Function')),
         );
       } else if (event == AuthChangeEvent.signedOut) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -104,7 +104,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
         if (snapshot.connectionState == ConnectionState.active) {
           final session = snapshot.data?.session;
           return session != null
-              ? const MyHomePage(title: 'University Club Events')
+              ? const MyHomePage(title: 'Function')
               : const LoginScreen();
         }
 
@@ -430,7 +430,7 @@ class _MyHomePageState extends State<MyHomePage> {
               padding: const EdgeInsets.all(16.0),
               children: [
                 const Text(
-                  'Welcome to FUNQ!',
+                  'Welcome to Function',
                   style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 32),

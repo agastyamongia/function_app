@@ -242,7 +242,7 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
               '\$${widget.event.price?.toStringAsFixed(2)}',
             ),
           ],
-          if (widget.event.isPublished && widget.event.shareableLink != null) ...[
+          if (widget.event.isPublished) ...[
             const SizedBox(height: 16),
             const Divider(),
             const SizedBox(height: 16),
@@ -260,28 +260,28 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    'https://funq.app${widget.event.shareableLink}',
+                    widget.event.shareableLink ?? 'No link available',
                     style: const TextStyle(
                       color: Colors.blue,
                       decoration: TextDecoration.underline,
                     ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
                 IconButton(
                   icon: const Icon(Icons.copy),
-                  onPressed: () {
+                  onPressed: widget.event.shareableLink == null ? null : () {
                     Clipboard.setData(ClipboardData(
-                      text: 'https://funq.app${widget.event.shareableLink}',
-                    )).then((_) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Link copied to clipboard!'),
-                          duration: Duration(seconds: 2),
-                        ),
-                      );
-                    });
+                      text: widget.event.shareableLink!,
+                    ));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Link copied to clipboard!'),
+                        duration: Duration(seconds: 2),
+                      ),
+                    );
                   },
-                  tooltip: 'Copy link',
                 ),
               ],
             ),

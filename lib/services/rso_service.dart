@@ -17,6 +17,7 @@ class RSOService {
         throw Exception('User must be logged in to create an RSO');
       }
 
+      // Create the RSO
       final response = await _supabase.from('rsos').insert({
         'name': name,
         'description': description,
@@ -28,6 +29,12 @@ class RSOService {
         'created_at': DateTime.now().toIso8601String(),
         'is_active': true,
       }).select().single();
+
+      // Add creator as an admin
+      await _supabase.from('rso_admins').insert({
+        'rso_id': response['id'],
+        'user_id': userId,
+      });
 
       return response;
     } catch (e) {

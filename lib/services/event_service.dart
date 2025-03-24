@@ -13,7 +13,6 @@ class EventService {
     required String location,
     double? price,
     String? qrCodeUrl,
-    String? shareableLink,
   }) async {
     try {
       final userId = _supabase.auth.currentUser?.id;
@@ -21,9 +20,18 @@ class EventService {
         throw Exception('User must be logged in to create an event');
       }
 
-      // Generate a unique shareable link
-      final uniqueId = DateTime.now().millisecondsSinceEpoch.toString();
-      final generatedShareableLink = '/event/$uniqueId';
+      // Get RSO name first
+      final rsoResponse = await _supabase
+          .from('rsos')
+          .select('name')
+          .eq('id', rsoId)
+          .single();
+      
+      final rsoName = rsoResponse['name'] as String;
+
+      // Generate a unique ID for the shareable link
+      final linkId = DateTime.now().millisecondsSinceEpoch.toString();
+      final shareableLink = 'https://functionapp.vercel.app/events/$linkId';
 
       final response = await _supabase.from('events').insert({
         'rso_id': rsoId,
@@ -36,11 +44,15 @@ class EventService {
         'created_at': DateTime.now().toIso8601String(),
         'is_published': false,
         'qr_code_url': qrCodeUrl,
-        'shareable_link': generatedShareableLink,
+        'shareable_link': shareableLink,
         'creator_id': userId,
       }).select().single();
 
-      return Event.fromMap(response);
+      // Add RSO name to the response before creating Event object
+      return Event.fromMap({
+        ...response,
+        'rso_name': rsoName,
+      });
     } catch (e) {
       throw Exception('Failed to create event: $e');
     }
@@ -140,12 +152,6 @@ class EventService {
       final userId = _supabase.auth.currentUser?.id;
       if (userId == null) {
         throw Exception('User must be logged in to publish an event');
-      }
-
-      // Verify the user owns this event
-      final event = await getEvent(eventId);
-      if (event == null || event.creatorId != userId) {
-        throw Exception('You do not have permission to publish this event');
       }
 
       await _supabase
