@@ -8,6 +8,7 @@ import 'screens/event_creation_screen.dart';
 import 'package:intl/intl.dart';
 import 'models/event.dart';
 import 'screens/event_details_screen.dart';
+import 'routes/web_routes.dart';
 
 /// Initializes the Supabase client and starts the application
 Future<void> main() async {
@@ -25,13 +26,13 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Function',
-      debugShowCheckedModeBanner: false,
+      title: 'RSO Events',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
         useMaterial3: true,
       ),
-      home: const AuthWrapper(),
+      onGenerateRoute: WebRoutes.generateRoute,
+      home: const MyHomePage(title: 'RSO Events'),
     );
   }
 }

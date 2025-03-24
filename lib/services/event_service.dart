@@ -239,26 +239,9 @@ class EventService {
   /// Register a user for an event
   Future<void> registerForEvent(String eventId) async {
     try {
-      final userId = _supabase.auth.currentUser!.id;
-      final event = await getEvent(eventId);
-
-      // Check if user is already registered
-      final existingRegistration = await _supabase
-          .from('event_registrations')
-          .select()
-          .eq('event_id', eventId)
-          .eq('user_id', userId)
-          .maybeSingle();
-
-      if (existingRegistration != null) {
-        throw 'You are already registered for this event';
-      }
-
-      // Create registration record
       await _supabase.from('event_registrations').insert({
         'event_id': eventId,
-        'user_id': userId,
-        'amount_paid': event?.price,
+        'user_id': _supabase.auth.currentUser!.id,
         'created_at': DateTime.now().toIso8601String(),
       });
     } catch (e) {
