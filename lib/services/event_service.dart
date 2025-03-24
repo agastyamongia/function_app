@@ -29,10 +29,7 @@ class EventService {
       
       final rsoName = rsoResponse['name'] as String;
 
-      // Generate a unique ID for the shareable link
-      final linkId = DateTime.now().millisecondsSinceEpoch.toString();
-      final shareableLink = 'https://functionapp.vercel.app/events/$linkId';
-
+      // Create the event first to get its ID
       final response = await _supabase.from('events').insert({
         'rso_id': rsoId,
         'title': title,
@@ -44,14 +41,23 @@ class EventService {
         'created_at': DateTime.now().toIso8601String(),
         'is_published': false,
         'qr_code_url': qrCodeUrl,
-        'shareable_link': shareableLink,
         'creator_id': userId,
       }).select().single();
+
+      // Update the event with its shareable link using its actual ID
+      final eventId = response['id'];
+      final shareableLink = 'https://functionapp.vercel.app/events/$eventId';
+      
+      await _supabase
+          .from('events')
+          .update({'shareable_link': shareableLink})
+          .eq('id', eventId);
 
       // Add RSO name to the response before creating Event object
       return Event.fromMap({
         ...response,
         'rso_name': rsoName,
+        'shareable_link': shareableLink,
       });
     } catch (e) {
       throw Exception('Failed to create event: $e');
@@ -62,11 +68,21 @@ class EventService {
     try {
       final response = await _supabase
           .from('events')
-          .select()
+          .select('''
+            *,
+            rso:rsos (
+              name,
+              description
+            )
+          ''')
           .eq('id', id)
           .single();
 
-      return Event.fromMap(response);
+      // Add RSO name to the event data
+      return Event.fromMap({
+        ...response,
+        'rso_name': response['rso']['name'],
+      });
     } catch (e) {
       return null;
     }

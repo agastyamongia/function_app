@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../models/event.dart';
 import '../services/event_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'login_screen.dart';
 
 class EventRegistrationScreen extends StatefulWidget {
   final String eventId;
@@ -305,6 +306,22 @@ class _EventRegistrationScreenState extends State<EventRegistrationScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Event Registration'),
+        actions: [
+          // Show login button if user is not authenticated
+          if (_supabase.auth.currentUser == null)
+            TextButton.icon(
+              onPressed: () {
+                Navigator.of(context).pushReplacement(
+                  MaterialPageRoute(builder: (context) => const LoginScreen()),
+                );
+              },
+              icon: const Icon(Icons.login, color: Colors.white),
+              label: const Text(
+                'Login',
+                style: TextStyle(color: Colors.white),
+              ),
+            ),
+        ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())

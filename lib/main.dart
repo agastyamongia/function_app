@@ -9,6 +9,7 @@ import 'package:intl/intl.dart';
 import 'models/event.dart';
 import 'screens/event_details_screen.dart';
 import 'routes/web_routes.dart';
+import 'screens/event_registration_screen.dart';
 
 /// Initializes the Supabase client and starts the application
 Future<void> main() async {
@@ -25,6 +26,10 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Check if we're accessing an event registration page
+    final isEventRegistration = Uri.base.pathSegments.length >= 2 && 
+                              Uri.base.pathSegments[0] == 'events';
+
     return MaterialApp(
       title: 'RSO Events',
       theme: ThemeData(
@@ -32,7 +37,11 @@ class MyApp extends StatelessWidget {
         useMaterial3: true,
       ),
       onGenerateRoute: WebRoutes.generateRoute,
-      home: const MyHomePage(title: 'RSO Events'),
+      initialRoute: Uri.base.path,
+      // Use EventRegistrationScreen for registration links, AuthWrapper for everything else
+      home: isEventRegistration
+          ? EventRegistrationScreen(eventId: Uri.base.pathSegments[1])
+          : const AuthWrapper(),
     );
   }
 }
