@@ -70,20 +70,32 @@ class EventService {
           .from('events')
           .select('''
             *,
-            rso:rsos (
-              name,
-              description
+            rsos!inner (
+              name
             )
           ''')
           .eq('id', id)
           .single();
 
-      // Add RSO name to the event data
-      return Event.fromMap({
+      if (response == null) return null;
+
+      // Safely extract RSO name with null check
+      final rsoName = response['rsos'] != null ? response['rsos']['name'] : null;
+      if (rsoName == null) {
+        print('Warning: RSO name is null for event $id');
+      }
+
+      // Create a clean map without the nested rsos object
+      final eventMap = {
         ...response,
-        'rso_name': response['rso']['name'],
-      });
+        'rso_name': rsoName ?? 'Unknown RSO', // Provide a default value
+      };
+      // Remove the nested rsos object to avoid conflicts
+      eventMap.remove('rsos');
+
+      return Event.fromMap(eventMap);
     } catch (e) {
+      print('Error fetching event: $e');
       return null;
     }
   }
@@ -114,20 +126,29 @@ class EventService {
           .from('events')
           .select('''
             *,
-            rso:rsos (
-              name,
-              description
+            rsos!inner (
+              name
             )
           ''')
           .eq('creator_id', userId)
           .order('rso_id');
 
-      return response.map<Event>((event) => Event.fromMap({
-        ...event,
-        'rso_name': event['rso']['name'], // Add RSO name to the event data
-      })).toList();
+      return response.map<Event>((event) {
+        // Safely extract RSO name with null check
+        final rsoName = event['rsos'] != null ? event['rsos']['name'] : null;
+        
+        // Create a clean map without the nested rsos object
+        final eventMap = {
+          ...event,
+          'rso_name': rsoName ?? 'Unknown RSO',
+        };
+        eventMap.remove('rsos');
+        
+        return Event.fromMap(eventMap);
+      }).toList();
     } catch (e) {
-      throw Exception('Failed to fetch user events: $e');
+      print('Error fetching user events: $e');
+      return [];
     }
   }
 
@@ -214,30 +235,34 @@ class EventService {
       double totalRevenue = 0;
       final List<Map<String, dynamic>> registeredUsers = [];
 
-      // Get user profiles for all registered users
+      // Process registrations and fetch profiles
       for (final registration in registrations) {
         try {
           // Get the user's profile
           final profileResponse = await _supabase
               .from('profiles')
-              .select()
+              .select('full_name, phone_number')
               .eq('id', registration['user_id'])
-              .single();
+              .maybeSingle();
 
-          if (profileResponse != null) {
+          // Only add to registered users if we have valid profile data
+          if (profileResponse != null && 
+              profileResponse['full_name'] != null && 
+              profileResponse['phone_number'] != null) {
             registeredUsers.add({
-              'name': '${profileResponse['first_name']} ${profileResponse['last_name']}',
-              'email': profileResponse['email'],
-              'registered_at': registration['created_at'],
+              'name': profileResponse['full_name'],
+              'phone': profileResponse['phone_number'],
+              'registered_at': registration['created_at'] ?? DateTime.now().toIso8601String(),
             });
           }
 
           // Add to revenue if the event has a price
-          if (registration['amount_paid'] != null) {
-            totalRevenue += (registration['amount_paid'] as num).toDouble();
+          final amountPaid = registration['amount_paid'];
+          if (amountPaid != null) {
+            totalRevenue += (amountPaid as num).toDouble();
           }
         } catch (e) {
-          // Skip this user if profile fetch fails
+          print('Error fetching profile for registration: $e');
           continue;
         }
       }
@@ -248,52 +273,117 @@ class EventService {
         'registeredUsers': registeredUsers,
       };
     } catch (e) {
-      throw 'Failed to load event analytics: $e';
+      print('Failed to load event analytics: $e');
+      return {
+        'registeredCount': 0,
+        'totalRevenue': 0.0,
+        'registeredUsers': [],
+      };
     }
   }
 
-  /// Register a user for an event
-  Future<void> registerForEvent(String eventId) async {
+  /// Check if a phone number exists in profiles
+  Future<Map<String, dynamic>?> findUserByPhone(String phoneNumber) async {
     try {
-      await _supabase.from('event_registrations').insert({
-        'event_id': eventId,
-        'user_id': _supabase.auth.currentUser!.id,
-        'created_at': DateTime.now().toIso8601String(),
-      });
+      final response = await _supabase
+          .from('profiles')
+          .select('id, full_name, phone_number')
+          .eq('phone_number', phoneNumber)
+          .maybeSingle();
+      return response;
     } catch (e) {
-      throw 'Failed to register for event: $e';
+      throw 'Failed to find user: $e';
     }
   }
 
-  /// Cancel a user's registration for an event
-  Future<void> cancelRegistration(String eventId) async {
+  /// Create a new user and profile
+  Future<Map<String, dynamic>> createNewUser({
+    required String phoneNumber,
+    required String fullName,
+  }) async {
     try {
-      final userId = _supabase.auth.currentUser!.id;
+      // Create a new user in auth.users with metadata
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final email = 'user_$timestamp@temp.com';
+      final password = 'temp_${timestamp}_pwd';
+      
+      // Include user metadata that will be used by the trigger
+      final authResponse = await _supabase.auth.signUp(
+        email: email,
+        password: password,
+        data: {
+          'full_name': fullName,
+          'phone_number': phoneNumber,
+        }
+      );
 
-      await _supabase
-          .from('event_registrations')
-          .delete()
-          .eq('event_id', eventId)
-          .eq('user_id', userId);
+      if (authResponse.user == null) {
+        throw 'Failed to create user account';
+      }
+
+      // The trigger will have created the profile, but let's update it to ensure data is correct
+      final profile = await _supabase
+          .from('profiles')
+          .update({
+            'full_name': fullName,
+            'phone_number': phoneNumber,
+          })
+          .eq('id', authResponse.user!.id)
+          .select()
+          .single();
+
+      return profile;
     } catch (e) {
-      throw 'Failed to cancel registration: $e';
+      throw 'Failed to create user and profile: $e';
     }
   }
 
-  /// Check if a user is registered for an event
-  Future<bool> isUserRegistered(String eventId) async {
+  /// Register for an event using phone number
+  Future<void> registerForEventWithPhone({
+    required String eventId,
+    required String phoneNumber,
+    String? fullName,
+  }) async {
     try {
-      final userId = _supabase.auth.currentUser!.id;
-      final registration = await _supabase
+      // Check if user exists by phone number
+      final existingUser = await findUserByPhone(phoneNumber);
+      String userId;
+
+      if (existingUser != null) {
+        // Use existing user's ID - no need to update name for existing users
+        userId = existingUser['id'];
+      } else {
+        if (fullName == null) {
+          throw 'Name is required for new registration';
+        }
+        // Create new user with profile
+        final newUser = await createNewUser(
+          phoneNumber: phoneNumber,
+          fullName: fullName,
+        );
+        userId = newUser['id'];
+      }
+
+      // Check if already registered
+      final existingRegistration = await _supabase
           .from('event_registrations')
           .select()
           .eq('event_id', eventId)
           .eq('user_id', userId)
           .maybeSingle();
 
-      return registration != null;
+      if (existingRegistration != null) {
+        throw 'This phone number is already registered for this event';
+      }
+
+      // Create registration
+      await _supabase.from('event_registrations').insert({
+        'event_id': eventId,
+        'user_id': userId,
+        'created_at': DateTime.now().toIso8601String(),
+      });
     } catch (e) {
-      throw 'Failed to check registration status: $e';
+      throw 'Failed to register for event: $e';
     }
   }
 } 

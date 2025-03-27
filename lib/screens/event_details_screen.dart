@@ -370,7 +370,6 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
                       child: Text(user['name'][0]),
                     ),
                     title: Text(user['name']),
-                    subtitle: Text(user['email']),
                     trailing: Text(
                       DateFormat('MMM d, y').format(
                         DateTime.parse(user['registered_at']),

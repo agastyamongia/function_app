@@ -70,51 +70,43 @@ class _EventRegistrationScreenState extends State<EventRegistrationScreen> {
     });
 
     try {
-      // Format phone number to E.164 format
       String phoneNumber = _phoneController.text.trim();
       if (!phoneNumber.startsWith('+')) {
         phoneNumber = '+1$phoneNumber'; // Assuming US numbers
       }
 
-      // Check if user exists in auth.users
-      final response = await _supabase
-          .from('profiles')
-          .select()
-          .eq('phone', phoneNumber)
-          .maybeSingle();
+      // Check if user exists by phone number
+      final existingUser = await _eventService.findUserByPhone(phoneNumber);
 
-      if (response != null) {
-        // User exists, proceed with registration
-        await _registerExistingUser(response['id']);
+      if (existingUser != null) {
+        // Register existing user directly without asking for name
+        await _eventService.registerForEventWithPhone(
+          eventId: widget.eventId,
+          phoneNumber: phoneNumber,
+        );
+        if (mounted) {
+          setState(() {
+            _isRegistering = false;
+            _showNameField = false;
+          });
+          _showSuccessDialog();
+        }
       } else {
-        // Show name field for new user registration
+        // Show name field for new user
+        if (mounted) {
+          setState(() {
+            _showNameField = true;
+            _isRegistering = false;
+          });
+        }
+      }
+    } catch (e) {
+      if (mounted) {
         setState(() {
-          _showNameField = true;
           _isRegistering = false;
+          _errorMessage = e.toString();
         });
       }
-    } catch (e) {
-      setState(() {
-        _isRegistering = false;
-        _errorMessage = 'Error checking phone number: $e';
-      });
-    }
-  }
-
-  Future<void> _registerExistingUser(String userId) async {
-    try {
-      await _eventService.registerForEvent(widget.eventId);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Successfully registered for event!')),
-        );
-        // Show success screen or navigate back
-      }
-    } catch (e) {
-      setState(() {
-        _isRegistering = false;
-        _errorMessage = 'Failed to register: $e';
-      });
     }
   }
 
@@ -129,24 +121,70 @@ class _EventRegistrationScreenState extends State<EventRegistrationScreen> {
     try {
       String phoneNumber = _phoneController.text.trim();
       if (!phoneNumber.startsWith('+')) {
-        phoneNumber = '+1$phoneNumber'; // Assuming US numbers
+        phoneNumber = '+1$phoneNumber';
       }
 
-      // Create new user profile
-      final userResponse = await _supabase.from('profiles').insert({
-        'phone': phoneNumber,
-        'first_name': _nameController.text.trim(),
-        'created_at': DateTime.now().toIso8601String(),
-      }).select().single();
+      // Register with phone and name
+      await _eventService.registerForEventWithPhone(
+        eventId: widget.eventId,
+        phoneNumber: phoneNumber,
+        fullName: _nameController.text.trim(),
+      );
 
-      // Register for event
-      await _registerExistingUser(userResponse['id']);
+      if (mounted) {
+        setState(() {
+          _isRegistering = false;
+          _showNameField = false;
+        });
+        _showSuccessDialog();
+      }
     } catch (e) {
-      setState(() {
-        _isRegistering = false;
-        _errorMessage = 'Failed to create profile: $e';
-      });
+      if (mounted) {
+        setState(() {
+          _isRegistering = false;
+          _errorMessage = e.toString();
+        });
+      }
     }
+  }
+
+  void _showSuccessDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Registration Successful!'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('You have successfully registered for this event.'),
+              const SizedBox(height: 16),
+              if (_event?.price != null) ...[
+                const Text(
+                  'Please note: Payment will be collected at the event.',
+                  style: TextStyle(fontStyle: FontStyle.italic),
+                ),
+                const SizedBox(height: 16),
+              ],
+              const Text(
+                'We will send you a reminder before the event.',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop(); // Close dialog
+              },
+              child: const Text('OK'),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   String? _validatePhoneNumber(String? value) {
@@ -306,8 +344,8 @@ class _EventRegistrationScreenState extends State<EventRegistrationScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Event Registration'),
+        automaticallyImplyLeading: false,
         actions: [
-          // Show login button if user is not authenticated
           if (_supabase.auth.currentUser == null)
             TextButton.icon(
               onPressed: () {
