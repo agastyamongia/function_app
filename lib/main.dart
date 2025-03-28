@@ -12,6 +12,7 @@ import 'routes/web_routes.dart';
 import 'screens/event_registration_screen.dart';
 
 /// Initializes the Supabase client and starts the application
+// main function
 Future<void> main() async {
   await Supabase.initialize(
     url: 'https://eolsgonqepuyolaagmsl.supabase.co',
