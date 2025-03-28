@@ -296,50 +296,69 @@ class EventService {
     }
   }
 
-  /// Create a new user and profile
+  /// Create a new user and profile with just phone number
   Future<Map<String, dynamic>> createNewUser({
     required String phoneNumber,
-    required String fullName,
   }) async {
     try {
-      // Create a new user in auth.users with metadata
-      final timestamp = DateTime.now().millisecondsSinceEpoch;
-      final email = 'user_$timestamp@temp.com';
-      final password = 'temp_${timestamp}_pwd';
+      // Create a new user in auth.users with phone number as email
+      final email = '${phoneNumber.replaceAll('+', '')}@placeholder.com';
+      final password = 'temp_${DateTime.now().millisecondsSinceEpoch}';
       
-      // Include user metadata that will be used by the trigger
+      // First create the auth user
       final authResponse = await _supabase.auth.signUp(
         email: email,
         password: password,
-        data: {
-          'full_name': fullName,
-          'phone_number': phoneNumber,
-        }
       );
 
       if (authResponse.user == null) {
-        throw 'Failed to create user account';
+        throw Exception('Failed to create user account');
       }
 
-      // The trigger will have created the profile, but let's update it to ensure data is correct
+      // Create profile with just phone number
+      final profile = await _supabase
+          .from('profiles')
+          .insert({
+            'id': authResponse.user!.id,
+            'phone_number': phoneNumber,
+            'created_at': DateTime.now().toIso8601String(),
+          })
+          .select()
+          .single();
+
+      // Sign out the temporary user since we don't need them logged in
+      await _supabase.auth.signOut();
+
+      return profile;
+    } catch (e) {
+      throw Exception('Failed to create user and profile: $e');
+    }
+  }
+
+  /// Update user's name in their profile
+  Future<Map<String, dynamic>> updateUserName({
+    required String userId,
+    required String fullName,
+  }) async {
+    try {
       final profile = await _supabase
           .from('profiles')
           .update({
             'full_name': fullName,
-            'phone_number': phoneNumber,
+            'updated_at': DateTime.now().toIso8601String(),
           })
-          .eq('id', authResponse.user!.id)
+          .eq('id', userId)
           .select()
           .single();
 
       return profile;
     } catch (e) {
-      throw 'Failed to create user and profile: $e';
+      throw Exception('Failed to update user name: $e');
     }
   }
 
   /// Register for an event using phone number
-  Future<void> registerForEventWithPhone({
+  Future<Map<String, dynamic>> registerForEventWithPhone({
     required String eventId,
     required String phoneNumber,
     String? fullName,
@@ -350,18 +369,22 @@ class EventService {
       String userId;
 
       if (existingUser != null) {
-        // Use existing user's ID - no need to update name for existing users
+        // Use existing user's ID
         userId = existingUser['id'];
       } else {
-        if (fullName == null) {
-          throw 'Name is required for new registration';
-        }
-        // Create new user with profile
+        // Create new user with just phone number
         final newUser = await createNewUser(
           phoneNumber: phoneNumber,
-          fullName: fullName,
         );
         userId = newUser['id'];
+        
+        // If name is provided, update it
+        if (fullName != null) {
+          await updateUserName(
+            userId: userId,
+            fullName: fullName,
+          );
+        }
       }
 
       // Check if already registered
@@ -377,11 +400,17 @@ class EventService {
       }
 
       // Create registration
-      await _supabase.from('event_registrations').insert({
-        'event_id': eventId,
-        'user_id': userId,
-        'created_at': DateTime.now().toIso8601String(),
-      });
+      final registration = await _supabase
+          .from('event_registrations')
+          .insert({
+            'event_id': eventId,
+            'user_id': userId,
+            'created_at': DateTime.now().toIso8601String(),
+          })
+          .select()
+          .single();
+
+      return registration;
     } catch (e) {
       throw 'Failed to register for event: $e';
     }

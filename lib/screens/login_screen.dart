@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../services/auth_service.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -10,32 +11,35 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _emailController = TextEditingController();
-  final _passwordController = TextEditingController();
+  final _phoneController = TextEditingController();
+  final _otpController = TextEditingController();
+  final _authService = AuthService();
   bool _isLoading = false;
-  bool _isSignUp = false;
+  bool _showOTPField = false;
 
-  String? _validateEmail(String? value) {
+  String? _validatePhoneNumber(String? value) {
     if (value == null || value.isEmpty) {
-      return 'Please enter your email';
+      return 'Please enter your phone number';
     }
-    if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(value)) {
-      return 'Please enter a valid email';
+    // Basic phone number validation
+    final phoneRegExp = RegExp(r'^\+?1?\d{10}$');
+    if (!phoneRegExp.hasMatch(value.replaceAll(RegExp(r'[^\d]'), ''))) {
+      return 'Please enter a valid phone number';
     }
     return null;
   }
 
-  String? _validatePassword(String? value) {
+  String? _validateOTP(String? value) {
     if (value == null || value.isEmpty) {
-      return 'Please enter your password';
+      return 'Please enter the verification code';
     }
-    if (value.length < 6) {
-      return 'Password must be at least 6 characters';
+    if (value.length != 6) {
+      return 'Verification code must be 6 digits';
     }
     return null;
   }
 
-  Future<void> _handleAuth() async {
+  Future<void> _sendOTP() async {
     if (!_formKey.currentState!.validate()) return;
 
     setState(() {
@@ -43,104 +47,57 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     try {
-      if (_isSignUp) {
-        final response = await Supabase.instance.client.auth.signUp(
-          email: _emailController.text,
-          password: _passwordController.text,
-        );
-        
-        if (response.user != null && mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Check your email to confirm your account!'),
-            ),
-          );
-        }
-      } else {
-        final response = await Supabase.instance.client.auth.signInWithPassword(
-          email: _emailController.text,
-          password: _passwordController.text,
-        );
-
-        if (response.session == null) {
-          throw const AuthException('No session created after login');
-        }
-      }
-    } on AuthException catch (error) {
-      if (mounted) {
-        String errorMessage = 'An error occurred';
-        switch (error.message) {
-          case 'Invalid login credentials':
-            errorMessage = 'Invalid email or password';
-            break;
-          case 'Email not confirmed':
-            errorMessage = 'Please confirm your email before logging in';
-            break;
-          case 'User not found':
-            errorMessage = 'No account found with this email';
-            break;
-          default:
-            errorMessage = error.message;
-        }
-        
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(errorMessage),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('An unexpected error occurred: ${error.toString()}'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
-    }
-  }
-
-  Future<void> _resetPassword() async {
-    if (!_formKey.currentState!.validate()) return;
-
-    setState(() {
-      _isLoading = true;
-    });
-
-    try {
-      await Supabase.instance.client.auth.resetPasswordForEmail(
-        _emailController.text,
-      );
+      await _authService.sendOTP(_phoneController.text);
       
       if (mounted) {
+        setState(() {
+          _showOTPField = true;
+          _isLoading = false;
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Password reset instructions sent to your email'),
+            content: Text('Verification code sent! Please check your phone.'),
           ),
         );
       }
     } catch (error) {
       if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error sending reset instructions: ${error.toString()}'),
+            content: Text('Error sending verification code: ${error.toString()}'),
             backgroundColor: Colors.red,
           ),
         );
       }
-    } finally {
+    }
+  }
+
+  Future<void> _verifyOTP() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      await _authService.verifyOTPAndSignIn(
+        _phoneController.text,
+        _otpController.text,
+      );
+    } catch (error) {
       if (mounted) {
         setState(() {
           _isLoading = false;
         });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error verifying code: ${error.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
       }
     }
   }
@@ -166,37 +123,37 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
                 const SizedBox(height: 48),
                 TextFormField(
-                  controller: _emailController,
+                  controller: _phoneController,
                   decoration: const InputDecoration(
-                    labelText: 'Email',
+                    labelText: 'Phone Number',
+                    hintText: '(123) 456-7890',
                     border: OutlineInputBorder(),
                   ),
-                  keyboardType: TextInputType.emailAddress,
-                  validator: _validateEmail,
+                  keyboardType: TextInputType.phone,
+                  validator: _validatePhoneNumber,
+                  enabled: !_showOTPField,
                 ),
-                const SizedBox(height: 16),
-                TextFormField(
-                  controller: _passwordController,
-                  decoration: const InputDecoration(
-                    labelText: 'Password',
-                    border: OutlineInputBorder(),
-                  ),
-                  obscureText: true,
-                  validator: _validatePassword,
-                ),
-                if (!_isSignUp) ...[
-                  const SizedBox(height: 8),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: TextButton(
-                      onPressed: _isLoading ? null : _resetPassword,
-                      child: const Text('Forgot Password?'),
+                if (_showOTPField) ...[
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: _otpController,
+                    decoration: const InputDecoration(
+                      labelText: 'Verification Code',
+                      hintText: '123456',
+                      border: OutlineInputBorder(),
                     ),
+                    keyboardType: TextInputType.number,
+                    validator: _validateOTP,
+                    maxLength: 6,
                   ),
                 ],
                 const SizedBox(height: 24),
                 ElevatedButton(
-                  onPressed: _isLoading ? null : _handleAuth,
+                  onPressed: _isLoading
+                      ? null
+                      : _showOTPField
+                          ? _verifyOTP
+                          : _sendOTP,
                   style: ElevatedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 16),
                   ),
@@ -206,21 +163,15 @@ class _LoginScreenState extends State<LoginScreen> {
                           width: 20,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : Text(_isSignUp ? 'Sign Up' : 'Login'),
+                      : Text(_showOTPField ? 'Verify Code' : 'Send Code'),
                 ),
-                const SizedBox(height: 16),
-                TextButton(
-                  onPressed: _isLoading
-                      ? null
-                      : () {
-                          setState(() {
-                            _isSignUp = !_isSignUp;
-                          });
-                        },
-                  child: Text(_isSignUp
-                      ? 'Already have an account? Login'
-                      : 'Don\'t have an account? Sign up!'),
-                ),
+                if (_showOTPField) ...[
+                  const SizedBox(height: 16),
+                  TextButton(
+                    onPressed: _isLoading ? null : _sendOTP,
+                    child: const Text('Resend Code'),
+                  ),
+                ],
               ],
             ),
           ),
@@ -231,8 +182,8 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   void dispose() {
-    _emailController.dispose();
-    _passwordController.dispose();
+    _phoneController.dispose();
+    _otpController.dispose();
     super.dispose();
   }
 }

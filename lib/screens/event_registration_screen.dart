@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import '../models/event.dart';
 import '../services/event_service.dart';
+import '../services/auth_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'login_screen.dart';
 
@@ -21,15 +22,19 @@ class EventRegistrationScreen extends StatefulWidget {
 class _EventRegistrationScreenState extends State<EventRegistrationScreen> {
   final _formKey = GlobalKey<FormState>();
   final _phoneController = TextEditingController();
+  final _otpController = TextEditingController();
   final _nameController = TextEditingController();
   final _eventService = EventService();
+  final _authService = AuthService();
   final _supabase = Supabase.instance.client;
 
   bool _isLoading = true;
   bool _isRegistering = false;
+  bool _showOTPField = false;
   bool _showNameField = false;
   Event? _event;
   String? _errorMessage;
+  String? _newUserId;
 
   @override
   void initState() {
@@ -61,7 +66,7 @@ class _EventRegistrationScreenState extends State<EventRegistrationScreen> {
     }
   }
 
-  Future<void> _checkPhoneNumber() async {
+  Future<void> _sendOTP() async {
     if (!_formKey.currentState!.validate()) return;
 
     setState(() {
@@ -75,11 +80,70 @@ class _EventRegistrationScreenState extends State<EventRegistrationScreen> {
         phoneNumber = '+1$phoneNumber'; // Assuming US numbers
       }
 
-      // Check if user exists by phone number
+      // Check if already registered
+      final existingUser = await _eventService.findUserByPhone(phoneNumber);
+      if (existingUser != null) {
+        final existingRegistration = await _supabase
+            .from('event_registrations')
+            .select()
+            .eq('event_id', widget.eventId)
+            .eq('user_id', existingUser['id'])
+            .maybeSingle();
+
+        if (existingRegistration != null) {
+          throw 'This phone number is already registered for this event';
+        }
+      }
+
+      // Send OTP
+      await _authService.sendOTP(phoneNumber);
+      
+      if (mounted) {
+        setState(() {
+          _showOTPField = true;
+          _isRegistering = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Verification code sent! Please check your phone.'),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isRegistering = false;
+          _errorMessage = e.toString();
+        });
+      }
+    }
+  }
+
+  Future<void> _verifyOTPAndProceed() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() {
+      _isRegistering = true;
+      _errorMessage = null;
+    });
+
+    try {
+      String phoneNumber = _phoneController.text.trim();
+      if (!phoneNumber.startsWith('+')) {
+        phoneNumber = '+1$phoneNumber';
+      }
+
+      // Verify OTP
+      await _authService.verifyOTPAndSignIn(
+        phoneNumber,
+        _otpController.text,
+      );
+
+      // Check if user exists
       final existingUser = await _eventService.findUserByPhone(phoneNumber);
 
       if (existingUser != null) {
-        // Register existing user directly without asking for name
+        // Register existing user directly
         await _eventService.registerForEventWithPhone(
           eventId: widget.eventId,
           phoneNumber: phoneNumber,
@@ -87,15 +151,21 @@ class _EventRegistrationScreenState extends State<EventRegistrationScreen> {
         if (mounted) {
           setState(() {
             _isRegistering = false;
-            _showNameField = false;
+            _showOTPField = false;
           });
           _showSuccessDialog();
         }
       } else {
-        // Show name field for new user
+        // Create new user with just phone number
+        final newUser = await _eventService.createNewUser(
+          phoneNumber: phoneNumber,
+        );
+        
         if (mounted) {
           setState(() {
+            _newUserId = newUser['id'];
             _showNameField = true;
+            _showOTPField = false;
             _isRegistering = false;
           });
         }
@@ -110,7 +180,7 @@ class _EventRegistrationScreenState extends State<EventRegistrationScreen> {
     }
   }
 
-  Future<void> _registerNewUser() async {
+  Future<void> _completeRegistration() async {
     if (!_formKey.currentState!.validate()) return;
 
     setState(() {
@@ -124,7 +194,15 @@ class _EventRegistrationScreenState extends State<EventRegistrationScreen> {
         phoneNumber = '+1$phoneNumber';
       }
 
-      // Register with phone and name
+      // Update user's name
+      if (_newUserId != null) {
+        await _eventService.updateUserName(
+          userId: _newUserId!,
+          fullName: _nameController.text.trim(),
+        );
+      }
+
+      // Complete the registration
       await _eventService.registerForEventWithPhone(
         eventId: widget.eventId,
         phoneNumber: phoneNumber,
@@ -290,8 +368,30 @@ class _EventRegistrationScreenState extends State<EventRegistrationScreen> {
             ),
             keyboardType: TextInputType.phone,
             validator: _validatePhoneNumber,
-            enabled: !_showNameField,
+            enabled: !_showOTPField && !_showNameField,
           ),
+          if (_showOTPField) ...[
+            const SizedBox(height: 16),
+            TextFormField(
+              controller: _otpController,
+              decoration: const InputDecoration(
+                labelText: 'Verification Code',
+                hintText: '123456',
+                border: OutlineInputBorder(),
+              ),
+              keyboardType: TextInputType.number,
+              validator: (value) {
+                if (value == null || value.isEmpty) {
+                  return 'Please enter the verification code';
+                }
+                if (value.length != 6) {
+                  return 'Verification code must be 6 digits';
+                }
+                return null;
+              },
+              maxLength: 6,
+            ),
+          ],
           if (_showNameField) ...[
             const SizedBox(height: 16),
             TextFormField(
@@ -321,8 +421,10 @@ class _EventRegistrationScreenState extends State<EventRegistrationScreen> {
             onPressed: _isRegistering
                 ? null
                 : _showNameField
-                    ? _registerNewUser
-                    : _checkPhoneNumber,
+                    ? _completeRegistration
+                    : _showOTPField
+                        ? _verifyOTPAndProceed
+                        : _sendOTP,
             style: ElevatedButton.styleFrom(
               padding: const EdgeInsets.symmetric(vertical: 16),
             ),
@@ -332,8 +434,19 @@ class _EventRegistrationScreenState extends State<EventRegistrationScreen> {
                     width: 20,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : Text(_showNameField ? 'Register' : 'Continue'),
+                : Text(_showNameField
+                    ? 'Complete Registration'
+                    : _showOTPField
+                        ? 'Verify Code'
+                        : 'Send Code'),
           ),
+          if (_showOTPField) ...[
+            const SizedBox(height: 16),
+            TextButton(
+              onPressed: _isRegistering ? null : _sendOTP,
+              child: const Text('Resend Code'),
+            ),
+          ],
         ],
       ),
     );
@@ -388,6 +501,7 @@ class _EventRegistrationScreenState extends State<EventRegistrationScreen> {
   @override
   void dispose() {
     _phoneController.dispose();
+    _otpController.dispose();
     _nameController.dispose();
     super.dispose();
   }
